@@ -21,17 +21,34 @@ internal data class TvSetupStatus(val loading: Boolean = true, val configured: B
 /** Saved configuration, not a promise about provider quota, capture permission or model runtime. */
 internal suspend fun readTvSetupStatus(context: Context, config: CaptionOverlayConfig): TvSetupStatus = withContext(Dispatchers.IO) {
     try {
-        val configured = if (ByokPolicy.FEATURE_BYOK) {
-            val official = config.engine == CaptionEngineChoice.CLOUD &&
-                CloudConfigStore.sttMode(context) == CloudConfigStore.SttMode.STREAMING_OPENAI &&
-                EasySetupPreset.canReuseKey(CloudConfigStore.Provider.OPENAI, CloudConfigStore.Provider.OPENAI.baseUrl,
-                    CloudConfigStore.provider(context), CloudConfigStore.baseUrl(context))
-            official && synchronized(ApiKeyStore) {
-                val present = ApiKeyStore.hasOpenAiKey(context)
-                ApiKeyStore.lastFailure?.let { error(it) }
-                present
+        val configured = when {
+            config.engine == CaptionEngineChoice.CLOUD && ByokPolicy.FEATURE_BYOK -> {
+                val mode = CloudConfigStore.sttMode(context)
+                val provider = CloudConfigStore.provider(context)
+                when (mode) {
+                    CloudConfigStore.SttMode.BATCH -> {
+                        EasySetupPreset.endpoint(CloudConfigStore.baseUrl(context),
+                            allowInsecureHttp = provider == CloudConfigStore.Provider.CUSTOM)
+                        val modelReady = CloudConfigStore.sttModel(context).isNotBlank()
+                        val keyReady = synchronized(ApiKeyStore) {
+                            val secret = ApiKeyStore.getOpenAiKey(context)
+                            ApiKeyStore.lastFailure?.let { error(it) }
+                            !cloudSpeechKeyRequired(mode, provider) || secret.isNotBlank()
+                        }
+                        modelReady && keyReady
+                    }
+                    CloudConfigStore.SttMode.STREAMING_OPENAI -> {
+                        val official = EasySetupPreset.canReuseKey(CloudConfigStore.Provider.OPENAI,
+                            CloudConfigStore.Provider.OPENAI.baseUrl, provider, CloudConfigStore.baseUrl(context))
+                        official && synchronized(ApiKeyStore) {
+                            val present = ApiKeyStore.hasOpenAiKey(context)
+                            ApiKeyStore.lastFailure?.let { error(it) }
+                            present
+                        }
+                    }
+                    else -> false
+                }
             }
-        } else when {
             config.engine == CaptionEngineChoice.CLOUD -> false
             config.engine.speechBackend != null -> {
                 val model = LocalSpeechModels(File(context.filesDir, "speech-models")).select(config.engine, config.modelId)

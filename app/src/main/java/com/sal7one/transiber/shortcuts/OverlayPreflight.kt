@@ -60,8 +60,10 @@ internal suspend fun overlayPreflight(context: Context, shortcut: OverlayShortcu
                     ApiKeyStore.lastFailure?.let { error(it) }
                     check(!com.sal7one.transiber.byok.cloudSpeechKeyRequired(cloudMode,CloudConfigStore.provider(context)) || secret.isNotBlank()) { "${cloudMode.label}: API key missing. Add it in Cloud speech settings." }
                     if (cloudMode == CloudConfigStore.SttMode.BATCH) {
-                        val url = java.net.URI(CloudConfigStore.baseUrl(context))
-                        require(url.scheme == "https" && !url.host.isNullOrBlank() && url.userInfo == null) { "Cloud speech requires a valid HTTPS base URL without embedded credentials." }
+                        com.sal7one.transiber.setup.EasySetupPreset.endpoint(
+                            CloudConfigStore.baseUrl(context),
+                            allowInsecureHttp = CloudConfigStore.provider(context) == CloudConfigStore.Provider.CUSTOM,
+                        )
                         require(CloudConfigStore.sttModel(context).isNotBlank()) { "Cloud speech model is missing." }
                     }
                     "${cloudMode.label} · connection configured (quota/connectivity checked when connecting)"
