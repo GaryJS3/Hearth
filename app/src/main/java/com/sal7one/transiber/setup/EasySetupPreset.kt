@@ -36,14 +36,18 @@ internal object EasySetupPreset {
             target=if(live) TranslationTarget.of(target) else previous.target,
             localTranslationEnabled=false, textTranslationProviderId="")
     }
-    fun endpoint(value: String): String {
-        val trimmed=value.trim().trimEnd('/')
-        val uri=runCatching { URI(trimmed) }.getOrElse { error("Enter a valid HTTPS server URL.") }
-        require(uri.scheme=="https" && !uri.host.isNullOrBlank() && uri.userInfo==null && uri.query==null && uri.fragment==null) {
-            "Use an HTTPS API base URL without embedded keys, a query or a fragment."
+    fun endpoint(value: String, allowInsecureHttp: Boolean = false): String {
+        val trimmed = value.trim().trimEnd('/')
+        val uri = runCatching { URI(trimmed) }.getOrElse { error("Enter a valid API server URL.") }
+        require((uri.scheme == "https" || (allowInsecureHttp && uri.scheme == "http")) &&
+            !uri.host.isNullOrBlank() && uri.userInfo == null && uri.query == null && uri.fragment == null) {
+            "Use an HTTPS API base URL, or HTTP for an explicitly selected custom server, without credentials or URL parameters."
         }
         return trimmed
     }
     fun canReuseKey(chosen: CloudConfigStore.Provider, candidateEndpoint: String, saved: CloudConfigStore.Provider, savedEndpoint: String): Boolean =
-        chosen==saved && runCatching { endpoint(candidateEndpoint)==endpoint(savedEndpoint) }.getOrDefault(false)
+        chosen == saved && runCatching {
+            endpoint(candidateEndpoint, chosen == CloudConfigStore.Provider.CUSTOM) ==
+                endpoint(savedEndpoint, chosen == CloudConfigStore.Provider.CUSTOM)
+        }.getOrDefault(false)
 }

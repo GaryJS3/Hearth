@@ -358,15 +358,10 @@ class MainActivity : AppCompatActivity() {
        if (tvHome) com.sal7one.transiber.home.TvHomeScreen(
         onSetup = { tvSetupFeature = com.sal7one.transiber.setup.TvSetupFeature.STT; go(15) },
         onStart = {
-         lifecycleScope.launch {
-          val saved = CaptionConfigStore.config(this@MainActivity).first()
-          val openAi = saved.engine == CaptionEngineChoice.CLOUD && CloudConfigStore.sttMode(this@MainActivity) == CloudConfigStore.SttMode.STREAMING_OPENAI &&
-           com.sal7one.transiber.setup.EasySetupPreset.canReuseKey(CloudConfigStore.Provider.OPENAI, CloudConfigStore.Provider.OPENAI.baseUrl,
-            CloudConfigStore.provider(this@MainActivity), CloudConfigStore.baseUrl(this@MainActivity))
-          if (ByokPolicy.FEATURE_BYOK && !openAi) { go(15); tvSetupFeature = com.sal7one.transiber.setup.TvSetupFeature.STT }
-          else startActivity(android.content.Intent(this@MainActivity, com.sal7one.transiber.shortcuts.OverlayLaunchActivity::class.java))
-         }
-        },
+          // Saved configuration is validated by the overlay preflight; skip repeat setup.
+          startActivity(android.content.Intent(this@MainActivity,
+           com.sal7one.transiber.shortcuts.OverlayLaunchActivity::class.java))
+         },
        ) else if (tvUi) com.sal7one.transiber.setup.TvSetupScreen(feature = tvSetupFeature,
         onFeature = { tvSetupFeature = it }, onHome = { home() }, onFullInterface = { fullInterface = true; route = AppNavigation.initial(0); home() })
        else if (atHome) HomeScreen(

@@ -63,7 +63,7 @@ internal class EasySetupActions(context: Context) {
     suspend fun applyCloud(provider: CloudConfigStore.Provider, baseUrl: String, model: String, key: String, target: String) {
         check(ByokPolicy.FEATURE_BYOK) { "Cloud connections are unavailable in the offline build." };idle()
         EasySetupPreset.cloud(CaptionOverlayConfig(),provider,target) // Validate before saving credentials.
-        val endpoint=EasySetupPreset.endpoint(baseUrl)
+        val endpoint=EasySetupPreset.endpoint(baseUrl, allowInsecureHttp = provider == CloudConfigStore.Provider.CUSTOM)
         require(model.isNotBlank()) { "Enter the speech model name supplied by your server." }
         val reuse=EasySetupPreset.canReuseKey(provider,endpoint,CloudConfigStore.provider(context),CloudConfigStore.baseUrl(context))
         val mode=if(provider==CloudConfigStore.Provider.OPENAI)CloudConfigStore.SttMode.STREAMING_OPENAI else CloudConfigStore.SttMode.BATCH

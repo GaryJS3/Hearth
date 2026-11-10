@@ -48,6 +48,21 @@ class EasySetupPresetTest {
         for(url in listOf("http://server/v1","server/v1","https://user:key@server/v1","https://server/v1?key=x","https://server/v1#key","https:///v1"))
             assertThrows(IllegalArgumentException::class.java) { EasySetupPreset.endpoint(url) }
     }
+    @Test fun customHttpIsExplicitAndKeysDoNotLeakAcrossSchemes() {
+        assertEquals("http://192.168.1.10:8000/v1",
+            EasySetupPreset.endpoint(" http://192.168.1.10:8000/v1/ ", allowInsecureHttp = true))
+        assertThrows(IllegalArgumentException::class.java) {
+            EasySetupPreset.endpoint("http://192.168.1.10:8000/v1")
+        }
+        assertTrue(EasySetupPreset.canReuseKey(Provider.CUSTOM,
+            "http://192.168.1.10:8000/v1/", Provider.CUSTOM, "http://192.168.1.10:8000/v1"))
+        assertFalse(EasySetupPreset.canReuseKey(Provider.CUSTOM,
+            "https://192.168.1.10:8000/v1", Provider.CUSTOM, "http://192.168.1.10:8000/v1"))
+        assertThrows(IllegalArgumentException::class.java) {
+            EasySetupPreset.endpoint("http://user:secret@localhost/v1", allowInsecureHttp = true)
+        }
+    }
+
     @Test fun onlyExplicitBatchServersCanOmitKey() {
         for(mode in SttMode.entries) for(provider in Provider.entries)
             assertEquals(mode!=SttMode.BATCH || provider!=Provider.CUSTOM,cloudSpeechKeyRequired(mode,provider))
