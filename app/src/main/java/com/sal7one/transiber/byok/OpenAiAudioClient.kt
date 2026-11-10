@@ -40,7 +40,7 @@ class OpenAiAudioClient(
         val trimmed = baseUrl.trim().trimEnd('/')
         if (!trimmed.startsWith("https://") && !trimmed.startsWith("http://")) {
             throw ByokHttpException(
-                "Base URL is not absolute ($trimmed) — set a full https:// endpoint " +
+                "Base URL is not absolute ($trimmed) — set a full https:// or LAN http:// endpoint " +
                     "in the cloud provider settings."
             )
         }

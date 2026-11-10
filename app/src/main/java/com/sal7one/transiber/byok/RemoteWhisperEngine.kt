@@ -48,7 +48,11 @@ class RemoteWhisperEngine(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var config: SttConfig? = null
     private val buffer = UtteranceBuffer(sampleRate = TARGET_SAMPLE_RATE, maxMs = 4_000)
-    private val requests = Channel<ShortArray>(capacity = 2)
+    private data class PendingRequest(val pcm: ShortArray, val enqueuedAtMs: Long, val generation: Long)
+    private val requests = Channel<PendingRequest>(capacity = 1)
+    @Volatile private var generation = 0L
+    private val maxQueuedAgeMs = 5_000L
+    private val maxResultAgeMs = 12_000L
     private val finals = ConcurrentLinkedQueue<String>()
 
     @Volatile private var published: String = ""
@@ -68,16 +72,22 @@ class RemoteWhisperEngine(
         this.config = config
         initialized = true
         scope.launch {
-            for (pcm in requests) {
+            for (request in requests) {
                 if (!initialized) break
+                if (request.generation != generation ||
+                    System.currentTimeMillis() - request.enqueuedAtMs > maxQueuedAgeMs) continue
                 val cfg = this@RemoteWhisperEngine.config ?: break
                 try {
-                    val wav = WavEncoder.encodePcm16(pcm, TARGET_SAMPLE_RATE)
+                    val wav = WavEncoder.encodePcm16(request.pcm, TARGET_SAMPLE_RATE)
                     val text = if (cfg.translateToEnglish) client.translateToEnglish(wav)
                         else client.transcribe(wav, languageCode(cfg.language))
-                    if (initialized && text.isNotBlank()) finals.add(text)
+                    if (initialized && request.generation == generation &&
+                        System.currentTimeMillis() - request.enqueuedAtMs <= maxResultAgeMs &&
+                        text.isNotBlank()) finals.add(text)
                 } catch (e: CancellationException) { throw e }
-                catch (e: Exception) { if (initialized) lastError = "Cloud STT: ${e.message}" }
+                catch (e: Exception) {
+                    if (initialized && request.generation == generation) lastError = "Cloud STT: ${e.message}"
+                }
             }
         }
         return Result.success(Unit)
@@ -118,7 +128,9 @@ class RemoteWhisperEngine(
     }
 
     override suspend fun reset(): Result<Unit> {
+        generation++
         buffer.clear()
+        while (requests.tryReceive().isSuccess) { }
         published = ""
         finals.clear()
         lastError = null
@@ -127,6 +139,7 @@ class RemoteWhisperEngine(
 
     override suspend fun release() {
         initialized = false
+        generation++
         requests.close()
         client.cancel()
         scope.cancel()
@@ -165,11 +178,12 @@ class RemoteWhisperEngine(
     }
 
     private fun enqueue(pcm: ShortArray) {
-        if (requests.trySend(pcm).isFailure) {
-            // Drop queued stale work, never accumulate seconds indefinitely.
+        val fresh = PendingRequest(pcm, System.currentTimeMillis(), generation)
+        if (requests.trySend(fresh).isFailure) {
+            // Keep the in-flight request. Replace older queued work with fresh speech
+            // and do not turn a backlog into a permanent overlay warning.
             requests.tryReceive()
-            requests.trySend(pcm)
-            lastError = "Cloud STT cannot keep up: skipped queued audio. Choose Streaming · OpenAI for live captions."
+            requests.trySend(fresh)
         }
     }
 

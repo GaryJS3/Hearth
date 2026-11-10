@@ -182,9 +182,13 @@ fun CaptionOverlayWindow(
     val television = remember(context) { TvControls.isTvDevice(context) }
     if (television) {
         val content = CaptionReading.snapshot(state, cfg.showPartial)
-        // Keep real errors visible, without rendering the phone's status/control chrome.
-        val message = state.error ?: state.historyError?.let { uiText(UiR.string.caption_history_error, it) }
-            ?: state.translationNotice ?: tvCaptionText(content, cfg)
+        // Keep fatal capture errors visible. Ordinary cloud notices should not
+        // replace recognized captions or linger in the TV's reading area.
+        val captions = tvCaptionText(content, cfg)
+        val message = state.error ?: captions.ifBlank {
+            state.historyError?.let { uiText(UiR.string.caption_history_error, it) }
+                ?: state.translationNotice.orEmpty()
+        }
         TvOverlayText(message, cfg, Modifier.fillMaxWidth().height(availableHeightDp.coerceAtLeast(1f).dp))
         return
     }

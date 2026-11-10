@@ -44,6 +44,41 @@ class CaptionAudioQueueTest {
         assertEquals(0, queue.pendingSamples)
     }
 
+    @Test fun batchWhisperOverflowDropsStaleWaitingFramesAndKeepsCaptureAlive() = runBlocking {
+        val queue = CaptionAudioQueue(8, AudioOverloadPolicy.DROP_OLDEST)
+        assertTrue(queue.tryAccept(shortArrayOf(1, 2, 3, 4), 4))
+        assertTrue(queue.tryAccept(shortArrayOf(5, 6, 7, 8), 4))
+        assertTrue(queue.tryAccept(shortArrayOf(9, 10, 11, 12), 4))
+        assertEquals(4L, queue.droppedSamples)
+        assertNull(queue.failure)
+        queue.finish()
+        val processed = mutableListOf<Short>()
+        queue.consume { processed += it.toList() }
+        assertEquals(listOf<Short>(5, 6, 7, 8, 9, 10, 11, 12), processed)
+        assertEquals(0, queue.pendingSamples)
+    }
+
+    @Test fun batchWhisperOverflowWithOnlyInFlightAudioDropsIncomingButCanRecover() = runBlocking {
+        val queue = CaptionAudioQueue(8, AudioOverloadPolicy.DROP_OLDEST)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        assertTrue(queue.tryAccept(shortArrayOf(1, 2, 3, 4, 5, 6), 6))
+        val consumer = launch {
+            queue.consume {
+                if (it.size == 6) { entered.complete(Unit); release.await() }
+            }
+        }
+        entered.await()
+        assertFalse(queue.tryAccept(shortArrayOf(7, 8, 9, 10), 4))
+        assertTrue(queue.tryAccept(shortArrayOf(11, 12), 2))
+        assertEquals(4L, queue.droppedSamples)
+        assertNull(queue.failure)
+        queue.finish()
+        release.complete(Unit)
+        consumer.join()
+        assertEquals(0, queue.pendingSamples)
+    }
+
     @Test fun explicitCancelDiscardsWaitingFramesAndDoesNotInventFailure() = runBlocking {
         val queue = CaptionAudioQueue(8)
         queue.tryAccept(shortArrayOf(1, 2, 3), 3)

@@ -45,9 +45,13 @@ import kotlinx.coroutines.flow.first
     }
     Text(if(provider==CloudConfigStore.Provider.OPENAI) uiText(UiR.string.ui_live_speech_translation_with_your_openai_key_1bb6f) else uiText(UiR.string.ui_speech_captions_add_translation_later_in_settings_6c99e))
     if(provider==CloudConfigStore.Provider.CUSTOM) {
-        OutlinedTextField(endpoint,{endpoint=it},enabled=!busy,modifier=Modifier.fillMaxWidth(),singleLine=true,textStyle=MaterialTheme.typography.bodyLarge.copy(textDirection=androidx.compose.ui.text.style.TextDirection.Ltr),label={Text(uiText(UiR.string.ui_https_server_url_a8d51))},placeholder={Text("https://your-server/v1")})
+        OutlinedTextField(endpoint,{endpoint=it},enabled=!busy,modifier=Modifier.fillMaxWidth(),singleLine=true,textStyle=MaterialTheme.typography.bodyLarge.copy(textDirection=androidx.compose.ui.text.style.TextDirection.Ltr),label={Text("API server URL")},placeholder={Text("http://192.168.1.10:8000/v1")})
         OutlinedTextField(model,{model=it},enabled=!busy,modifier=Modifier.fillMaxWidth(),singleLine=true,textStyle=MaterialTheme.typography.bodyLarge.copy(textDirection=androidx.compose.ui.text.style.TextDirection.Ltr),label={Text(uiText(UiR.string.ui_speech_model_id_13cb8))})
         Text(uiText(UiR.string.ui_an_openai_compatible_speech_server_audio_goes_to_this_address_0ae3c),style=MaterialTheme.typography.bodySmall)
+        if (endpoint.trim().startsWith("http://", ignoreCase = true)) {
+            Text("HTTP is unencrypted. Use only on a trusted LAN; audio and API keys can be intercepted.",
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
     }
     OutlinedTextField(key,{key=it},enabled=!busy,modifier=Modifier.fillMaxWidth(),singleLine=true,textStyle=MaterialTheme.typography.bodyLarge.copy(textDirection=androidx.compose.ui.text.style.TextDirection.Ltr),
         visualTransformation=PasswordVisualTransformation(),label={Text(if(provider==CloudConfigStore.Provider.CUSTOM) uiText(UiR.string.ui_api_key_optional_9d882) else uiText(UiR.string.ui_api_key_cf678))},

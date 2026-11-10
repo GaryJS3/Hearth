@@ -37,5 +37,13 @@ class TvSetupStatusTest {
         CloudConfigStore.configureSpeech(context, CloudConfigStore.Provider.CUSTOM,
             "https://private.example/v1", "test-model", CloudConfigStore.SttMode.STREAMING_OPENAI)
         assertFalse(readTvSetupStatus(context, config).configured)
+        // An explicitly configured local batch server needs no key or HTTPS.
+        assertTrue(ApiKeyStore.setOpenAiKey(context, ""))
+        CloudConfigStore.configureSpeech(context, CloudConfigStore.Provider.CUSTOM,
+            "http://192.168.1.10:8000/v1", "whisper-1", CloudConfigStore.SttMode.BATCH)
+        assertTrue(readTvSetupStatus(context, config).configured)
+        CloudConfigStore.configureSpeech(context, CloudConfigStore.Provider.OPENAI,
+            "http://192.168.1.10:8000/v1", "whisper-1", CloudConfigStore.SttMode.BATCH)
+        assertFalse(readTvSetupStatus(context, config).configured)
     }
 }
