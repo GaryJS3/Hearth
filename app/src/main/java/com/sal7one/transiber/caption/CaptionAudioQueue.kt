@@ -4,14 +4,20 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 
 /**
- * Non-blocking capture ingress for every legacy/local/cloud SttEngine.
- * The sample budget includes the frame being processed, independent of recorder read size.
- * Overload fails this timeline instead of silently deleting already accepted speech.
+ * Non-blocking capture ingress for legacy/local/cloud engines.
+ * The batch Whisper path can drop stale waiting frames rather than ending capture;
+ * all other engines retain the original fail-on-overload behavior.
  */
-internal class CaptionAudioQueue(private val maxQueuedSamples: Int = 16_000) {
+internal enum class AudioOverloadPolicy { FAIL, DROP_OLDEST }
+
+internal class CaptionAudioQueue(
+    private val maxQueuedSamples: Int = 16_000,
+    private val overloadPolicy: AudioOverloadPolicy = AudioOverloadPolicy.FAIL,
+) {
     init { require(maxQueuedSamples in 1..48_000) }
     private val lock = Any()
     private var pending = 0
+    private var dropped = 0L
     private var closed = false
     private var consuming = false
     private var error: Throwable? = null
@@ -19,6 +25,7 @@ internal class CaptionAudioQueue(private val maxQueuedSamples: Int = 16_000) {
 
     val failure: Throwable? get() = synchronized(lock) { error }
     val pendingSamples: Int get() = synchronized(lock) { pending }
+    val droppedSamples: Long get() = synchronized(lock) { dropped }
 
     /** Copy only accepted samples: the recorder may reuse its array as soon as this returns. */
     fun tryAccept(samples: ShortArray, sampleCount: Int): Boolean = synchronized(lock) {
@@ -28,8 +35,22 @@ internal class CaptionAudioQueue(private val maxQueuedSamples: Int = 16_000) {
             return false
         }
         if (sampleCount > maxQueuedSamples - pending) {
-            fail(IllegalStateException("Audio processing cannot keep up: $pending samples pending; queue limit $maxQueuedSamples"))
-            return false
+            if (overloadPolicy == AudioOverloadPolicy.FAIL) {
+                fail(IllegalStateException("Audio processing cannot keep up: $pending samples pending; queue limit $maxQueuedSamples"))
+                return false
+            }
+            // Never interrupt an in-flight engine call. Discard only queued frames.
+            while (sampleCount > maxQueuedSamples - pending) {
+                val stale = frames.tryReceive().getOrNull() ?: break
+                pending -= stale.size
+                dropped += stale.size
+            }
+            // If the in-flight frame still fills the budget, discard incoming PCM
+            // without shutting down this capture generation.
+            if (sampleCount > maxQueuedSamples - pending) {
+                dropped += sampleCount
+                return false
+            }
         }
         val copy = samples.copyOf(sampleCount)
         pending += sampleCount

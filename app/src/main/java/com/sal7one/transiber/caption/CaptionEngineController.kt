@@ -390,6 +390,9 @@ class CaptionEngineController(
                     }
                     engine = loaded.legacy
                     localSpeech = loaded.speech
+                    if (loaded.legacy is RemoteWhisperEngine) {
+                        audioQueue = CaptionAudioQueue(overloadPolicy = AudioOverloadPolicy.DROP_OLDEST)
+                    }
                     val notice = withContext(Dispatchers.IO) { translationNoticeFor(config) }
                     if (generation != sessionGeneration) return@withLock
                     _state.update { it.copy(status = Status.RUNNING, translationNotice = notice) }
@@ -416,6 +419,20 @@ class CaptionEngineController(
 
     fun reportError(message: String) {
         _state.update { it.copy(status = Status.ERROR, error = message) }
+    }
+
+    /** Transient batch Whisper warnings expire; they do not become permanent captions. */
+    private fun showTransientWhisperNotice(message: String) {
+        val generation = sessionGeneration
+        _state.update { it.copy(translationNotice = message) }
+        scope.launch {
+            delay(2_500L)
+            if (generation == sessionGeneration) {
+                _state.update { current ->
+                    if (current.translationNotice == message) current.copy(translationNotice = null) else current
+                }
+            }
+        }
     }
 
     /** Stop processing immediately; the service retains consent for Resume. */
@@ -853,11 +870,11 @@ class CaptionEngineController(
                 // user knows why lines stopped (quota, network, bad key).
                 (current as? RemoteWhisperEngine)?.takeLastErrorForUi()?.let { cloudError ->
                     Log.w(TAG, "Cloud STT failed; details available in UI")
-                    _state.update { it.copy(translationNotice = cloudError) }
+                    showTransientWhisperNotice(cloudError)
                 }
                 (current as? RemoteWhisperEngine)?.takeLastNoticeForUi()?.let { cloudNotice ->
                     Log.i(TAG, "Cloud STT notice available in UI")
-                    _state.update { it.copy(translationNotice = cloudNotice) }
+                    showTransientWhisperNotice(cloudNotice)
                 }
                 // Streaming engines deliver SETTLED utterances here — promote
                 // each final straight into history (real-time utterance
@@ -1308,7 +1325,7 @@ class CaptionEngineController(
     /**
      * Stage captured PCM for the ordered consumer. Called from the capture
      * thread; never blocks on inference. Every accepted sample stays ordered;
-     * overload fails visibly rather than omitting words or accumulating lag.
+     * local/streaming overload fails; batch Whisper discards stale audio to stay live.
      */
     fun pushAudio(pcm: ShortArray, sampleCount: Int) {
         if (sampleCount <= 0 || sampleCount > pcm.size || stopping || clearingTranscript || currentConfig.paused ||
@@ -1384,7 +1401,8 @@ class CaptionEngineController(
                 oldPoll?.join(); oldAudio?.join()
                 if (speech != null) speech.reset() else legacy?.reset()?.getOrThrow()
                 if (generation != sessionGeneration) return@launch
-                audioQueue = CaptionAudioQueue()
+                audioQueue = CaptionAudioQueue(overloadPolicy =
+                    if (legacy is RemoteWhisperEngine) AudioOverloadPolicy.DROP_OLDEST else AudioOverloadPolicy.FAIL)
                 _state.update { it.copy(status = Status.RUNNING) }
                 startAudioConsumer()
                 startPolling()
